@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MPI Simulation Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body{font-family:Arial,sans-serif;max-width:980px;margin:20px auto;padding:0 12px}
+    section{border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+    label{font-size:13px;display:block;margin-bottom:4px}input,select{width:100%;box-sizing:border-box;padding:7px}button{margin-top:10px;padding:8px 12px}#status{min-height:20px}
+  </style>
+</head>
+<body>
+  <h1>MPI Simulation Dashboard</h1>
+  <section>
+    <h3>Parameter Controls</h3>
+    <div class="grid">
+      <div><label>Algorithm</label><select id="algorithm"><option value="ring">Ring</option><option value="pingpong">PingPong</option></select></div>
+      <div><label>Processes</label><input id="number_of_processes" type="number" value="4" min="1"></div>
+      <div><label>Message Size</label><input id="message_size" type="number" value="1024" min="1"></div>
+      <div><label>Iterations</label><input id="iterations" type="number" value="10" min="1"></div>
+      <div><label>Latency</label><input id="network_latency" value="10us"></div>
+      <div><label>Bandwidth</label><input id="network_bandwidth" value="10GBps"></div>
+    </div>
+    <button id="runBtn">Run Simulation</button>
+  </section>
+  <section>
+    <h3>Batch Experiment</h3>
+    <div class="grid">
+      <div><label>Start</label><input id="process_range_start" type="number" value="2" min="1"></div>
+      <div><label>End</label><input id="process_range_end" type="number" value="16" min="1"></div>
+      <div><label>Step</label><input id="step" type="number" value="2" min="1"></div>
+    </div>
+    <button id="batchBtn">Run Batch</button>
+  </section>
+  <section><h3>Execution Time vs Processes</h3><canvas id="procChart"></canvas></section>
+  <section><h3>Message Size vs Execution Time</h3><canvas id="msgChart"></canvas></section>
+  <p id="status"></p>
+<script>
+const $=id=>document.getElementById(id),num=id=>Number($(id).value),txt=id=>$(id).value.trim();
+const status=$("status"),runBtn=$("runBtn"),batchBtn=$("batchBtn");
+const post=(u,b)=>fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});
+const procChart=new Chart($("procChart"),{type:"line",data:{datasets:[{label:"ring",data:[],borderColor:"#2d6cdf"},{label:"pingpong",data:[],borderColor:"#d14b4b"}]},options:{parsing:false,scales:{x:{type:"linear",title:{display:true,text:"Processes"}},y:{title:{display:true,text:"Execution Time (s)"}}}}});
+const msgChart=new Chart($("msgChart"),{type:"scatter",data:{datasets:[{label:"results",data:[],backgroundColor:"#36a36e"}]},options:{parsing:false,scales:{x:{type:"linear",title:{display:true,text:"Message Size"}},y:{title:{display:true,text:"Execution Time (s)"}}}}});
+
+function setBusy(v){runBtn.disabled=v;batchBtn.disabled=v;}
+function basePayload(){return{algorithm:txt("algorithm"),number_of_processes:num("number_of_processes"),message_size:num("message_size"),iterations:num("iterations"),network_latency:txt("network_latency"),network_bandwidth:txt("network_bandwidth")}}
+
+async function loadResults(){
+  const res=await fetch('/results'); if(!res.ok) throw new Error('failed to fetch /results');
+  const rows=await res.json();
+  const ok=rows.filter(r=>r.time!==''&&!isNaN(Number(r.time)));
+  const ring=ok.filter(r=>(r.algorithm||'ring')==='ring').map(r=>({x:Number(r.processes),y:Number(r.time)}));
+  const ping=ok.filter(r=>r.algorithm==='pingpong').map(r=>({x:Number(r.processes),y:Number(r.time)}));
+  procChart.data.datasets[0].data=ring;procChart.data.datasets[1].data=ping;procChart.update();
+  msgChart.data.datasets[0].data=ok.map(r=>({x:Number(r.message_size),y:Number(r.time)}));msgChart.update();
+  status.textContent=`Loaded ${rows.length} result(s).`;
+}
+
+async function runSimulation(){
+  setBusy(true); status.textContent='Running simulation...';
+  try{const res=await post('/run_simulation',basePayload());const body=await res.json();if(!res.ok) throw new Error(body.error||'run failed');await loadResults();}
+  finally{setBusy(false);}
+}
+
+async function runBatch(){
+  setBusy(true); status.textContent='Running batch...';
+  const payload={...basePayload(),process_range_start:num('process_range_start'),process_range_end:num('process_range_end'),step:num('step')};
+  try{const res=await post('/run_batch',payload);const body=await res.json();if(!res.ok) throw new Error(body.error||'batch failed');await loadResults();}
+  finally{setBusy(false);}
+}
+
+runBtn.onclick=()=>runSimulation().catch(e=>status.textContent=`Error: ${e.message}`);
+batchBtn.onclick=()=>runBatch().catch(e=>status.textContent=`Error: ${e.message}`);
+loadResults().catch(()=>status.textContent='Could not load /results yet.');
+</script>
+</body>
+</html>

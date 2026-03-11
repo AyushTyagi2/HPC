@@ -1,0 +1,4 @@
+algorithm,processes,message_size,latency,bandwidth,time
+ring,4,1024,10us,10GBps,0.0031
+pingpong,2,1024,10us,10GBps,0.0008
+ring,8,1024,10us,10GBps,0.0062
